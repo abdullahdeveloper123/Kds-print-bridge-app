@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Secrets & local config (never commit these)
+.env
+config.json
+
+# Electron builder output
+dist/
+out/
+
+# Electron builder cache
+.cache/
+build/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

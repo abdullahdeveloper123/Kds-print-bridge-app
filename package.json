@@ -1,0 +1,60 @@
+{
+  "name": "kds-print-bridge",
+  "version": "1.0.0",
+  "description": "Local print bridge: listens for orders via WebSocket and prints to LAN thermal printer",
+  "author": "YumFood",
+  "main": "electron/main.js",
+
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "electron": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.yumfood.kds-print-bridge",
+    "productName": "KDS Print Bridge",
+    "copyright": "Copyright © 2024 YumFood",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/tray-icon.png",
+      "forceCodeSigning": false,
+      "signingHashAlgorithms": null
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true
+    },
+    "extraMetadata": {
+      "main": "electron/main.js"
+    }
+  }
+}

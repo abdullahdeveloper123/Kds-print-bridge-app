@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>KDS Print Bridge — Setup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-app-region: no-drag;
+    }
+
+    .window {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.15);
+      width: 480px;
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      padding: 24px 28px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .header-icon { font-size: 32px; }
+    .header h1 { font-size: 18px; font-weight: 700; }
+    .header p  { font-size: 12px; opacity: .6; margin-top: 2px; }
+
+    .steps {
+      display: flex;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .step {
+      flex: 1;
+      padding: 10px 0;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #adb5bd;
+      border-bottom: 2px solid transparent;
+      transition: all .2s;
+    }
+    .step.active { color: #6366f1; border-bottom-color: #6366f1; }
+    .step.done   { color: #22c55e; border-bottom-color: #22c55e; }
+
+    .body { padding: 24px 28px; }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .field { margin-bottom: 18px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .field .hint { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+
+    input[type=text], input[type=number], input[type=password] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #111827;
+      outline: none;
+      transition: border-color .15s;
+      font-family: inherit;
+    }
+    input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+    input.mono  { font-family: 'Courier New', monospace; }
+    input.error { border-color: #ef4444; }
+
+    .key-row {
+      display: flex;
+      align-items: center;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 8px;
+      transition: border-color .15s;
+    }
+    .key-row:focus-within { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+    .key-row input { border: none !important; box-shadow: none !important; flex: 1; }
+    .eye { background: none; border: none; cursor: pointer; padding: 0 10px; color: #9ca3af; font-size: 15px; }
+    .eye:hover { color: #374151; }
+
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .status-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-top: 8px;
+      min-height: 38px;
+    }
+    .status-box.idle    { background: #f9fafb; border: 1.5px solid #e5e7eb; color: #9ca3af; }
+    .status-box.loading { background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1d4ed8; }
+    .status-box.ok      { background: #f0fdf4; border: 1.5px solid #bbf7d0; color: #166534; }
+    .status-box.err     { background: #fef2f2; border: 1.5px solid #fecaca; color: #991b1b; }
+    .spin {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .chip {
+      padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+      border: 1.5px solid #e5e7eb; cursor: pointer; background: #fff; color: #6b7280;
+      user-select: none; transition: all .15s;
+    }
+    .chip.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+    .chip:hover:not(.active) { border-color: #6366f1; color: #6366f1; }
+
+    .summary-row {
+      display: flex; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid #f3f4f6;
+      font-size: 13px;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row .key   { color: #6b7280; font-weight: 500; }
+    .summary-row .value { color: #111827; font-weight: 600; font-family: monospace; font-size: 12px; }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 28px;
+      border-top: 1px solid #f3f4f6;
+      background: #fafafa;
+    }
+
+    .btn {
+      padding: 9px 22px; border-radius: 8px; font-size: 13px; font-weight: 700;
+      cursor: pointer; border: none; transition: all .15s;
+    }
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: #6b7280; border: 1.5px solid #e5e7eb; }
+    .btn-ghost:hover { border-color: #9ca3af; color: #374151; }
+    .btn-success { background: #22c55e; color: #fff; }
+    .btn-success:hover { background: #16a34a; }
+
+    .err-msg { font-size: 11px; color: #ef4444; margin-top: 4px; display: none; }
+    .err-msg.show { display: block; }
+
+    .done-icon { font-size: 48px; text-align: center; margin-bottom: 12px; }
+    .done-title { font-size: 18px; font-weight: 700; text-align: center; color: #111827; margin-bottom: 6px; }
+    .done-sub   { font-size: 13px; color: #6b7280; text-align: center; line-height: 1.5; }
+  </style>
+</head>
+<body>
+<div class="window">
+  <div class="header">
+    <div class="header-icon">🖨️</div>
+    <div>
+      <h1>KDS Print Bridge Setup</h1>
+      <p>Configure once — runs silently in the background</p>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="step active" id="step1-tab">1. Connection</div>
+    <div class="step"        id="step2-tab">2. Printer</div>
+    <div class="step"        id="step3-tab">3. Confirm</div>
+  </div>
+
+  <div class="body">
+
+    <!-- Page 1: Backend + API Key -->
+    <div class="page active" id="page1">
+      <div class="field">
+        <label>Backend URL</label>
+        <input type="text" id="backendUrl" placeholder="https://your-backend.onrender.com" class="mono"/>
+        <div class="hint">Your cloud backend address</div>
+        <div class="err-msg" id="backendUrlErr">Backend URL is required</div>
+      </div>
+      <div class="field">
+        <label>API Key</label>
+        <div class="key-row">
+          <input type="password" id="apiKey" placeholder="pk_xxxxxxxxxxxxxxxx" class="mono"
+            oninput="onKeyInput()" onblur="validateKey()"/>
+          <button class="eye" onclick="toggleKey()">👁</button>
+        </div>
+        <div class="hint">Generate from ERP → Settings → Printer Settings</div>
+        <div class="status-box idle" id="keyStatus">
+          <span>🏪</span><span id="keyStatusText">Enter your API key to verify</span>
+        </div>
+        <div class="err-msg" id="apiKeyErr">API Key is required</div>
+      </div>
+
+      <!-- Shown only when API key is tenant-level (no branch tied to it) -->
+      <div class="field" id="branchIdField" style="display:none">
+        <label>Branch ID</label>
+        <input type="text" id="manualBranchId" placeholder="e.g. 64f3a1b2c3d4e5f6a7b8c9d0" class="mono"/>
+        <div class="hint">Copy from ERP → Settings → Branch → Branch ID (MongoDB ObjectId)</div>
+        <div class="err-msg" id="manualBranchIdErr">Branch ID is required</div>
+      </div>
+    </div>
+
+    <!-- Page 2: Printer + Receipt -->
+    <div class="page" id="page2">
+      <div class="row2">
+        <div class="field">
+          <label>Printer IP Address</label>
+          <input type="text" id="printerIp" value="192.168.100.100" class="mono"/>
+          <div class="hint">Check printer network settings</div>
+          <div class="err-msg" id="printerIpErr">Printer IP is required</div>
+        </div>
+        <div class="field">
+          <label>Port</label>
+          <input type="number" id="printerPort" value="9100" class="mono"/>
+          <div class="hint">Default: 9100</div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Paper Width</label>
+        <div class="chips" id="widthChips">
+          <div class="chip" onclick="selectWidth('32',this)">58mm paper</div>
+          <div class="chip active" onclick="selectWidth('48',this)">80mm paper</div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Print these order types</label>
+        <div class="chips" id="typeChips">
+          <div class="chip" onclick="this.classList.toggle('active')">DineIn</div>
+          <div class="chip" onclick="this.classList.toggle('active')">TakeAway</div>
+          <div class="chip" onclick="this.classList.toggle('active')">Delivery</div>
+        </div>
+        <div class="hint">Leave all unselected to print every order type</div>
+      </div>
+    </div>
+
+    <!-- Page 3: Summary -->
+    <div class="page" id="page3">
+      <div id="summaryRows"></div>
+    </div>
+
+    <!-- Page 4: Done -->
+    <div class="page" id="page4">
+      <div class="done-icon">✅</div>
+      <div class="done-title">All set!</div>
+      <div class="done-sub">KDS Print Bridge is configured and running.<br>Find it in your system tray.</div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <button class="btn btn-ghost" id="backBtn" onclick="goBack()" style="visibility:hidden">← Back</button>
+    <button class="btn btn-primary" id="nextBtn" onclick="goNext()">Next →</button>
+  </div>
+</div>
+
+<script>
+  let currentPage = 1;
+  const TOTAL = 3;
+
+  // State
+  let verifiedBranchId   = '';
+  let verifiedBranchName = '';
+  let verifiedTenantName = '';
+  let selectedWidth = '48';
+
+  // Pre-fill from saved config on reconfigure
+  window.addEventListener('DOMContentLoaded', async () => {
+    if (!window.electronAPI) return;
+    try {
+      const cfg = await window.electronAPI.getConfig();
+      if (!cfg || !cfg.backendUrl) return;
+
+      document.getElementById('backendUrl').value = cfg.backendUrl || '';
+      document.getElementById('apiKey').value     = cfg.wsApiKey   || '';
+      selectedWidth = cfg.receiptWidth || '48';
+
+      // Restore width chip
+      document.querySelectorAll('#widthChips .chip').forEach(c => c.classList.remove('active'));
+      const wChip = [...document.querySelectorAll('#widthChips .chip')]
+        .find(c => c.textContent.includes(selectedWidth === '32' ? '58mm' : '80mm'));
+      if (wChip) wChip.classList.add('active');
+
+      // Restore order type chips
+      const types = (cfg.printOrderTypes || '').split(',').map(s => s.trim()).filter(Boolean);
+      document.querySelectorAll('#typeChips .chip').forEach(c => {
+        if (types.includes(c.textContent.trim())) c.classList.add('active');
+      });
+
+      // Restore printer fields
+      if (cfg.printerIp)   document.getElementById('printerIp').value   = cfg.printerIp;
+      if (cfg.printerPort) document.getElementById('printerPort').value = cfg.printerPort;
+
+      // Restore verified state
+      if (cfg.branchId) {
+        verifiedBranchId   = cfg.branchId;
+        verifiedBranchName = cfg.branchName || '';
+        verifiedTenantName = cfg.tenantName || '';
+        if (cfg.branchName) {
+          setKeyStatus('ok', '✅', `<strong>${esc(cfg.tenantName)}</strong> · ${esc(cfg.branchName)}`);
+        } else {
+          // Was a manually entered branch ID — show the field pre-filled
+          document.getElementById('branchIdField').style.display = 'block';
+          document.getElementById('manualBranchId').value = cfg.branchId;
+          setKeyStatus('ok', '✅', `<strong>${esc(cfg.tenantName)}</strong> · enter Branch ID below`);
+        }
+      }
+    } catch (_) {}
+  });
+
+  // ── Navigation ─────────────────────────────────────────────────────────────
+  function goNext() {
+    if (currentPage === 1) {
+      if (!validatePage1()) return;
+    } else if (currentPage === 2) {
+      if (!validatePage2()) return;
+      buildSummary();
+    } else if (currentPage === 3) {
+      saveAndFinish();
+      return;
+    } else if (currentPage === 4) {
+      window.electronAPI.closeSetup();
+      return;
+    }
+    currentPage++;
+    render();
+  }
+
+  function goBack() {
+    if (currentPage > 1) { currentPage--; render(); }
+  }
+
+  function render() {
+    document.querySelectorAll('.page').forEach((p, i) => {
+      p.classList.toggle('active', i + 1 === currentPage);
+    });
+    document.querySelectorAll('.step').forEach((s, i) => {
+      s.classList.remove('active', 'done');
+      if (i + 1 === currentPage) s.classList.add('active');
+      if (i + 1 < currentPage)  s.classList.add('done');
+    });
+
+    const backBtn = document.getElementById('backBtn');
+    const nextBtn = document.getElementById('nextBtn');
+
+    backBtn.style.visibility = currentPage > 1 && currentPage < 4 ? 'visible' : 'hidden';
+
+    if (currentPage === 3) {
+      nextBtn.textContent = '✓ Save & Start';
+      nextBtn.className = 'btn btn-success';
+    } else if (currentPage === 4) {
+      nextBtn.textContent = 'Close';
+      nextBtn.className = 'btn btn-primary';
+    } else {
+      nextBtn.textContent = 'Next →';
+      nextBtn.className = 'btn btn-primary';
+    }
+  }
+
+  // ── Validation ─────────────────────────────────────────────────────────────
+  function validatePage1() {
+    let ok = true;
+    const url = document.getElementById('backendUrl').value.trim();
+    const key = document.getElementById('apiKey').value.trim();
+
+    showErr('backendUrlErr', !url);
+    showErr('apiKeyErr', !key);
+    if (!url || !key) ok = false;
+
+    if (ok && !verifiedBranchId) {
+      // Check if manual branch ID field is visible and filled
+      const branchField = document.getElementById('branchIdField');
+      const manualId    = document.getElementById('manualBranchId').value.trim();
+      if (branchField.style.display !== 'none' && manualId) {
+        // User provided manual branch ID — accept it
+        verifiedBranchId = manualId;
+      } else if (branchField.style.display !== 'none' && !manualId) {
+        showErr('manualBranchIdErr', true);
+        return false;
+      } else {
+        setKeyStatus('err', '❌', 'Please wait for API key verification');
+        return false;
+      }
+    }
+    return ok;
+  }
+
+  function validatePage2() {
+    const ip = document.getElementById('printerIp').value.trim();
+    showErr('printerIpErr', !ip);
+    return !!ip;
+  }
+
+  function showErr(id, show) {
+    document.getElementById(id).classList.toggle('show', show);
+  }
+
+  // ── API Key validation ─────────────────────────────────────────────────────
+  let keyTimer = null;
+
+  function onKeyInput() {
+    clearTimeout(keyTimer);
+    verifiedBranchId = '';
+    document.getElementById('branchIdField').style.display = 'none';
+    document.getElementById('manualBranchId').value = '';
+    setKeyStatus('idle', '🏪', 'Enter your API key to verify');
+    keyTimer = setTimeout(validateKey, 700);
+  }
+
+  async function validateKey() {
+    const key     = document.getElementById('apiKey').value.trim();
+    const backend = document.getElementById('backendUrl').value.trim();
+    if (!key || key.length < 10) return;
+    if (!backend) { setKeyStatus('err', '❌', 'Enter Backend URL first'); return; }
+
+    setKeyStatus('loading', '<span class="spin"></span>', 'Verifying…');
+
+    try {
+      const res  = await fetch(backend.replace(/\/$/, '') + '/api/settings/printer/validate-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: key }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        verifiedBranchId   = data.branchId   || '';
+        verifiedBranchName = data.branchName || '';
+        verifiedTenantName = data.tenantName || '';
+
+        if (data.branchId) {
+          // API key is tied to a specific branch — no manual input needed
+          document.getElementById('branchIdField').style.display = 'none';
+          setKeyStatus('ok', '✅', `<strong>${esc(data.tenantName)}</strong> · ${esc(data.branchName)}`);
+        } else {
+          // Tenant-level key — user must supply their branch ID
+          document.getElementById('branchIdField').style.display = 'block';
+          setKeyStatus('ok', '✅', `<strong>${esc(data.tenantName)}</strong> · enter Branch ID below`);
+        }
+      } else {
+        verifiedBranchId = '';
+        document.getElementById('branchIdField').style.display = 'none';
+        setKeyStatus('err', '❌', data.message || 'Invalid API key');
+      }
+    } catch {
+      verifiedBranchId = '';
+      setKeyStatus('err', '⚠️', 'Could not reach backend — check the URL');
+    }
+  }
+
+  function setKeyStatus(cls, icon, text) {
+    const el = document.getElementById('keyStatus');
+    el.className = 'status-box ' + cls;
+    el.innerHTML = `<span>${icon}</span><span>${text}</span>`;
+  }
+
+  function toggleKey() {
+    const inp = document.getElementById('apiKey');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+
+  // ── Width chips ────────────────────────────────────────────────────────────
+  function selectWidth(val, el) {
+    document.querySelectorAll('#widthChips .chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    selectedWidth = val;
+  }
+
+  // ── Summary ────────────────────────────────────────────────────────────────
+  function buildSummary() {
+    const types = [...document.querySelectorAll('#typeChips .chip.active')]
+      .map(c => c.textContent.trim()).join(', ') || 'All types';
+
+    const rows = [
+      ['Restaurant', verifiedTenantName],
+      ['Branch',     verifiedBranchName || '—'],
+      ['Backend URL', document.getElementById('backendUrl').value.trim()],
+      ['Printer IP',  document.getElementById('printerIp').value.trim() + ':' + document.getElementById('printerPort').value.trim()],
+      ['Paper Width', selectedWidth === '32' ? '58mm' : '80mm'],
+      ['Print Types', types],
+    ];
+
+    document.getElementById('summaryRows').innerHTML = rows.map(([k, v]) =>
+      `<div class="summary-row"><span class="key">${k}</span><span class="value">${esc(v)}</span></div>`
+    ).join('');
+  }
+
+  // ── Save ───────────────────────────────────────────────────────────────────
+  async function saveAndFinish() {
+    const types = [...document.querySelectorAll('#typeChips .chip.active')]
+      .map(c => c.textContent.trim()).join(',');
+
+    const config = {
+      backendUrl:      document.getElementById('backendUrl').value.trim(),
+      wsApiKey:        document.getElementById('apiKey').value.trim(),
+      branchId:        verifiedBranchId,
+      branchName:      verifiedBranchName,
+      tenantName:      verifiedTenantName,
+      printerIp:       document.getElementById('printerIp').value.trim(),
+      printerPort:     document.getElementById('printerPort').value.trim(),
+      receiptWidth:    selectedWidth,
+      printOrderTypes: types,
+    };
+
+    await window.electronAPI.saveConfig(config);
+    currentPage = 4;
+    render();
+  }
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
