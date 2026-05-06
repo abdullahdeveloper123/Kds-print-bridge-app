@@ -37,13 +37,15 @@ function dashed() {
 }
 
 function now() {
-  const d = new Date();
+  const d    = new Date();
   const dd   = String(d.getDate()).padStart(2, '0');
   const mm   = String(d.getMonth() + 1).padStart(2, '0');
   const yyyy = d.getFullYear();
-  const hh   = String(d.getHours()).padStart(2, '0');
+  const raw  = d.getHours();
+  const ampm = raw >= 12 ? 'PM' : 'AM';
+  const hh   = String(raw % 12 || 12).padStart(2, '0');
   const min  = String(d.getMinutes()).padStart(2, '0');
-  return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+  return `${dd}/${mm}/${yyyy} ${hh}:${min} ${ampm}`;
 }
 
 // ── Receipt builder ───────────────────────────────────────────────────────────
@@ -100,14 +102,12 @@ function buildReceipt(order, config = {}) {
   p(dashed() + '\n');
 
   // ── Items header ──────────────────────────────────────────────────────────
-  const QTY_W    = 4;
-  const STATUS_W = 8;
-  const ITEM_W   = width - QTY_W - STATUS_W - 2;
+  const QTY_W  = 4;
+  const ITEM_W = width - QTY_W - 1;
 
   const colHeader =
     'ITEM'.padEnd(ITEM_W) +
-    'QTY'.padStart(QTY_W) +
-    'STATUS'.padStart(STATUS_W + 2);
+    'QTY'.padStart(QTY_W);
 
   p(CMD.BOLD_ON, colHeader + '\n', CMD.BOLD_OFF);
   p('='.repeat(width) + '\n');
@@ -116,14 +116,9 @@ function buildReceipt(order, config = {}) {
   const items = order.items ?? [];
 
   for (const item of items) {
-    const qty    = item.quantity ?? item.qty ?? 1;
-    const status = ['ready', 'dispatched', 'served'].includes(item.itemStatus)
-      ? 'Done' : 'Pending';
-
+    const qty  = item.quantity ?? item.qty ?? 1;
     const name = String(item.name ?? 'Item').slice(0, ITEM_W);
-    const row  = name.padEnd(ITEM_W) +
-                 String(qty).padStart(QTY_W) +
-                 status.padStart(STATUS_W + 2);
+    const row  = name.padEnd(ITEM_W) + String(qty).padStart(QTY_W);
     p(row + '\n');
 
     const variants = (item.variants ?? [])
@@ -159,15 +154,6 @@ function buildReceipt(order, config = {}) {
     p(CMD.BOLD_ON, 'NOTE:\n', CMD.BOLD_OFF);
     p(order.kitchenNotes + '\n');
   }
-
-  // ── Status footer ─────────────────────────────────────────────────────────
-  p(dashed() + '\n');
-  p(
-    CMD.BOLD_ON,
-    twoCol('STATUS', (order.orderStatus ?? order.status ?? 'PREPARING').toUpperCase()) + '\n',
-    CMD.BOLD_OFF,
-    dashed() + '\n',
-  );
 
   // ── Kitchen copy footer ───────────────────────────────────────────────────
   p(
