@@ -72,7 +72,7 @@
     }
     .field .hint { font-size: 11px; color: #9ca3af; margin-top: 4px; }
 
-    input[type=text], input[type=number], input[type=password] {
+    input[type=text], input[type=number], input[type=password], select {
       width: 100%;
       padding: 10px 12px;
       border: 1.5px solid #e5e7eb;
@@ -84,6 +84,8 @@
       font-family: inherit;
     }
     input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+    select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+    select:disabled { background: #f3f4f6; color: #9ca3af; }
     input.mono  { font-family: 'Courier New', monospace; }
     input.error { border-color: #ef4444; }
 
@@ -212,9 +214,16 @@
       <!-- Shown only when API key is tenant-level (no branch tied to it) -->
       <div class="field" id="branchIdField" style="display:none">
         <label>Branch ID</label>
-        <input type="text" id="manualBranchId" placeholder="e.g. 64f3a1b2c3d4e5f6a7b8c9d0" class="mono"/>
+        <input type="text" id="manualBranchId" placeholder="e.g. 64f3a1b2c3d4e5f6a7b8c9d0" class="mono" oninput="onManualBranchInput()"/>
         <div class="hint">Copy from ERP → Settings → Branch → Branch ID (MongoDB ObjectId)</div>
         <div class="err-msg" id="manualBranchIdErr">Branch ID is required</div>
+      </div>
+      <div class="field">
+        <label>Kitchen Station</label>
+        <select id="stationId" onchange="updateStationName()" disabled>
+          <option value="">All stations (full order)</option>
+        </select>
+        <div class="hint">Select a station to print only its items</div>
       </div>
     </div>
 
@@ -279,6 +288,9 @@
   let verifiedBranchId   = '';
   let verifiedBranchName = '';
   let verifiedTenantName = '';
+  let verifiedStationId  = '';
+  let verifiedStationName = '';
+  let pendingStationId   = '';
   let selectedWidth = '48';
 
   // Pre-fill from saved config on reconfigure
@@ -291,6 +303,9 @@
       document.getElementById('backendUrl').value = cfg.backendUrl || '';
       document.getElementById('apiKey').value     = cfg.wsApiKey   || '';
       selectedWidth = cfg.receiptWidth || '48';
+      pendingStationId = cfg.stationId || '';
+      verifiedStationId = cfg.stationId || '';
+      verifiedStationName = cfg.stationName || '';
 
       // Restore width chip
       document.querySelectorAll('#widthChips .chip').forEach(c => c.classList.remove('active'));
@@ -321,6 +336,9 @@
           document.getElementById('manualBranchId').value = cfg.branchId;
           setKeyStatus('ok', '✅', `<strong>${esc(cfg.tenantName)}</strong> · enter Branch ID below`);
         }
+      }
+      if (cfg.backendUrl && cfg.wsApiKey) {
+        validateKey();
       }
     } catch (_) {}
   });
@@ -414,14 +432,24 @@
 
   // ── API Key validation ─────────────────────────────────────────────────────
   let keyTimer = null;
+  let manualBranchTimer = null;
 
   function onKeyInput() {
     clearTimeout(keyTimer);
     verifiedBranchId = '';
+    verifiedStationId = '';
+    verifiedStationName = '';
+    pendingStationId = '';
     document.getElementById('branchIdField').style.display = 'none';
     document.getElementById('manualBranchId').value = '';
     setKeyStatus('idle', '🏪', 'Enter your API key to verify');
+    setStations([]);
     keyTimer = setTimeout(validateKey, 700);
+  }
+
+  function onManualBranchInput() {
+    clearTimeout(manualBranchTimer);
+    manualBranchTimer = setTimeout(validateKey, 700);
   }
 
   async function validateKey() {
@@ -430,19 +458,24 @@
     if (!key || key.length < 10) return;
     if (!backend) { setKeyStatus('err', '❌', 'Enter Backend URL first'); return; }
 
+    const manualBranchId = document.getElementById('manualBranchId').value.trim();
+
     setKeyStatus('loading', '<span class="spin"></span>', 'Verifying…');
 
     try {
+      const payload = { apiKey: key };
+      if (manualBranchId) payload.branchId = manualBranchId;
       const res  = await fetch(backend.replace(/\/$/, '') + '/api/settings/printer/validate-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: key }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
         verifiedBranchId   = data.branchId   || '';
         verifiedBranchName = data.branchName || '';
         verifiedTenantName = data.tenantName || '';
+        setStations(Array.isArray(data.stations) ? data.stations : []);
 
         if (data.branchId) {
           // API key is tied to a specific branch — no manual input needed
@@ -456,10 +489,12 @@
       } else {
         verifiedBranchId = '';
         document.getElementById('branchIdField').style.display = 'none';
+        setStations([]);
         setKeyStatus('err', '❌', data.message || 'Invalid API key');
       }
     } catch {
       verifiedBranchId = '';
+      setStations([]);
       setKeyStatus('err', '⚠️', 'Could not reach backend — check the URL');
     }
   }
@@ -468,6 +503,34 @@
     const el = document.getElementById('keyStatus');
     el.className = 'status-box ' + cls;
     el.innerHTML = `<span>${icon}</span><span>${text}</span>`;
+  }
+
+  function setStations(stations) {
+    const select = document.getElementById('stationId');
+    if (!select) return;
+
+    const selected = pendingStationId || select.value || '';
+    const opts = ['<option value="">All stations (full order)</option>'];
+    (stations || []).forEach(st => {
+      const id = st.id || st._id || '';
+      const name = st.name || 'Station';
+      if (!id) return;
+      opts.push('<option value="' + escAttr(id) + '">' + esc(name) + '</option>');
+    });
+    select.innerHTML = opts.join('');
+    if (selected) select.value = selected;
+    select.disabled = opts.length <= 1;
+    pendingStationId = '';
+    updateStationName();
+  }
+
+  function updateStationName() {
+    const select = document.getElementById('stationId');
+    if (!select) return;
+    const option = select.options[select.selectedIndex];
+    const name = option ? option.textContent.trim() : '';
+    verifiedStationId = select.value || '';
+    verifiedStationName = verifiedStationId && name !== 'All stations (full order)' ? name : '';
   }
 
   function toggleKey() {
@@ -490,6 +553,7 @@
     const rows = [
       ['Restaurant', verifiedTenantName],
       ['Branch',     verifiedBranchName || '—'],
+      ['Station',    verifiedStationName || 'All stations'],
       ['Backend URL', document.getElementById('backendUrl').value.trim()],
       ['Printer IP',  document.getElementById('printerIp').value.trim() + ':' + document.getElementById('printerPort').value.trim()],
       ['Paper Width', selectedWidth === '32' ? '58mm' : '80mm'],
@@ -512,6 +576,8 @@
       branchId:        verifiedBranchId,
       branchName:      verifiedBranchName,
       tenantName:      verifiedTenantName,
+      stationId:       verifiedStationId,
+      stationName:     verifiedStationName,
       printerIp:       document.getElementById('printerIp').value.trim(),
       printerPort:     document.getElementById('printerPort').value.trim(),
       receiptWidth:    selectedWidth,
@@ -523,8 +589,20 @@
     render();
   }
 
+  function escAttr(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 </script>
 </body>

@@ -33,6 +33,8 @@ function mergeWithEnv(saved) {
     branchId:        saved.branchId        ?? process.env.BRANCH_ID         ?? '',
     branchName:      saved.branchName      ?? '',
     tenantName:      saved.tenantName      ?? '',
+    stationId:       saved.stationId       ?? process.env.STATION_ID        ?? '',
+    stationName:     saved.stationName     ?? '',
     printerIp:       saved.printerIp       ?? process.env.PRINTER_IP        ?? '192.168.100.100',
     printerPort:     saved.printerPort     ?? process.env.PRINTER_PORT      ?? '9100',
     receiptWidth:    saved.receiptWidth    ?? process.env.RECEIPT_WIDTH     ?? '48',
@@ -67,8 +69,10 @@ function renderPage(config, saved = false, error = '') {
     .field{margin-bottom:16px}
     .field label{display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px}
     .field .hint{font-size:11px;color:#9ca3af;margin-top:4px}
-    input[type=text],input[type=number],input[type=password]{width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;color:#111827;outline:none;transition:border-color .15s;font-family:inherit}
+    input[type=text],input[type=number],input[type=password],select{width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;color:#111827;outline:none;transition:border-color .15s;font-family:inherit;background:#fff}
     input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+    select:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+    select:disabled{background:#f3f4f6;color:#9ca3af}
     input.mono{font-family:'Courier New',monospace;font-size:13px}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     .key-wrap{display:flex;align-items:center;gap:8px;border:1.5px solid #e5e7eb;border-radius:10px;padding:0 10px;transition:border-color .15s}
@@ -135,6 +139,14 @@ function renderPage(config, saved = false, error = '') {
           <input type="hidden" name="branchId"   id="branchId"   value="${v('branchId')}"/>
           <input type="hidden" name="branchName" id="branchName" value="${v('branchName')}"/>
           <input type="hidden" name="tenantName" id="tenantName" value="${v('tenantName')}"/>
+        </div>
+        <div class="field">
+          <label>Kitchen Station</label>
+          <select name="stationId" id="stationIdSelect" data-selected="${v('stationId')}" onchange="updateStationName()">
+            <option value="">All stations (full order)</option>
+          </select>
+          <div class="hint">Select a station to print only its items</div>
+          <input type="hidden" name="stationName" id="stationName" value="${v('stationName')}"/>
         </div>
       </div>
 
@@ -218,6 +230,8 @@ function renderPage(config, saved = false, error = '') {
     document.getElementById('branchId').value   = '';
     document.getElementById('branchName').value = '';
     document.getElementById('tenantName').value = '';
+    setStations([]);
+    updateStationName();
     validateTimer = setTimeout(validateKey, 800);
   }
 
@@ -242,6 +256,7 @@ function renderPage(config, saved = false, error = '') {
         document.getElementById('branchId').value   = data.branchId   || '';
         document.getElementById('branchName').value = data.branchName || '';
         document.getElementById('tenantName').value = data.tenantName || '';
+        setStations(Array.isArray(data.stations) ? data.stations : []);
         setStatus('ok', '✅', '<strong>' + escHtml(data.tenantName) + '</strong> · ' + escHtml(data.branchName));
       } else {
         setStatus('err', '❌', data.message || 'Invalid API key');
@@ -257,21 +272,46 @@ function renderPage(config, saved = false, error = '') {
     el.innerHTML = '<span class="branch-icon">' + icon + '</span><span>' + text + '</span>';
   }
 
+  function setStations(stations) {
+    const select = document.getElementById('stationIdSelect');
+    if (!select) return;
+
+    const selected = select.getAttribute('data-selected') || select.value || '';
+    const opts = ['<option value="">All stations (full order)</option>'];
+    (stations || []).forEach(st => {
+      const id = st.id || st._id || '';
+      const name = st.name || 'Station';
+      if (!id) return;
+      opts.push('<option value="' + escAttr(id) + '">' + escHtml(name) + '</option>');
+    });
+    select.innerHTML = opts.join('');
+    if (selected) select.value = selected;
+    select.disabled = opts.length <= 1;
+    updateStationName();
+  }
+
+  function updateStationName() {
+    const select = document.getElementById('stationIdSelect');
+    const nameInput = document.getElementById('stationName');
+    if (!select || !nameInput) return;
+    const option = select.options[select.selectedIndex];
+    const name = option ? option.textContent.trim() : '';
+    nameInput.value = select.value && name !== 'All stations (full order)' ? name : '';
+  }
+
   function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function escAttr(s) {
+    return escHtml(s).replace(/"/g,'&quot;');
   }
 
   window.addEventListener('DOMContentLoaded', () => {
     const key     = document.getElementById('apiKeyInput').value.trim();
     const backend = document.getElementById('backendUrl').value.trim();
-    const saved   = document.getElementById('branchName').value.trim();
 
-    if (key && backend && saved) {
-      const tenant = document.getElementById('tenantName').value.trim();
-      setStatus('ok', '✅', '<strong>' + escHtml(tenant) + '</strong> · ' + escHtml(saved));
-    } else if (key && backend) {
-      validateKey();
-    }
+    if (key && backend) validateKey();
   });
 </script>
 </body>
@@ -302,6 +342,8 @@ function startConfigServer(onConfigSaved) {
             branchId:        p.get('branchId')?.trim()        || '',
             branchName:      p.get('branchName')?.trim()      || '',
             tenantName:      p.get('tenantName')?.trim()      || '',
+            stationId:       p.get('stationId')?.trim()       || '',
+            stationName:     p.get('stationName')?.trim()     || '',
             printerIp:       p.get('printerIp')?.trim()       || '192.168.100.100',
             printerPort:     p.get('printerPort')?.trim()     || '9100',
             receiptWidth:    p.get('receiptWidth')?.trim()    || '48',

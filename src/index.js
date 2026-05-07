@@ -33,6 +33,7 @@ function getConfig() {
     BACKEND_URL:     saved.backendUrl      || process.env.BACKEND_URL      || '',
     WS_API_KEY:      saved.wsApiKey        || process.env.WS_API_KEY        || '',
     BRANCH_ID:       saved.branchId        || process.env.BRANCH_ID         || '',
+    STATION_ID:      saved.stationId       || process.env.STATION_ID        || '',
     PRINTER_IP:      saved.printerIp       || process.env.PRINTER_IP        || '192.168.100.100',
     PRINTER_PORT:    parseInt(saved.printerPort  || process.env.PRINTER_PORT  || '9100', 10),
     RESTAURANT_NAME: saved.tenantName      || saved.restaurantName          ||
@@ -219,8 +220,8 @@ function startBridge(cfg, onStatus) {
     console.log(`[WS] Connecting to ${cfg.BACKEND_URL} ...`);
 
     const socket = io(cfg.BACKEND_URL, {
-      auth:         { apiKey: cfg.WS_API_KEY, branchId: cfg.BRANCH_ID },
-      query:        { branchId: cfg.BRANCH_ID },
+      auth:         { apiKey: cfg.WS_API_KEY, branchId: cfg.BRANCH_ID, stationId: cfg.STATION_ID },
+      query:        { branchId: cfg.BRANCH_ID, stationId: cfg.STATION_ID },
       transports:   ['websocket'],
       reconnection: false,
       timeout:      10000,
@@ -298,6 +299,7 @@ function startBridge(cfg, onStatus) {
   console.log(`  Printer : ${cfg.PRINTER_IP}:${cfg.PRINTER_PORT}`);
   console.log(`  Backend : ${cfg.BACKEND_URL}`);
   console.log(`  Branch  : ${cfg.BRANCH_ID}`);
+  console.log(`  Station : ${cfg.STATION_ID || 'ALL'}`);
   console.log(`  Filter  : ${cfg.PRINT_TYPES.length ? cfg.PRINT_TYPES.join(', ') : 'ALL'}`);
   console.log('─────────────────────────────────────────');
 
