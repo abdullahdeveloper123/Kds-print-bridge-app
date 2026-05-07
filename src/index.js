@@ -128,26 +128,11 @@ function startBridge(cfg, onStatus) {
   const queue = new PrintQueue(async ({ order, receipt, printJobId }) => {
     console.log(`[Print] Printing order ${order.orderNumber ?? order.id} ...`);
 
-    // Claim the job to prevent duplicate prints from concurrent sync calls
-    if (printJobId) {
-      try {
-        const claimRes = await apiPost(cfg, `/print-jobs/${printJobId}/claim`);
-        if (!claimRes.success) {
-          console.log(`[Print] Job ${printJobId} already claimed — skipping duplicate`);
-          _inFlight.delete(printJobId);
-          return;
-        }
-        console.log(`[Print] Claimed job ${printJobId}`);
-      } catch (claimErr) {
-        // 409 = already claimed by another process
-        if (claimErr.message.includes('409')) {
-          console.log(`[Print] Job ${printJobId} already claimed (409) — skipping`);
-          _inFlight.delete(printJobId);
-          return;
-        }
-        console.warn(`[Print] Could not claim job ${printJobId}: ${claimErr.message} — proceeding anyway`);
-      }
-    }
+    // ── Multi-bridge mode: No claim check ─────────────────────────────────
+    // Multiple bridge instances can print the same job independently.
+    // Each bridge ACKs after successful print. The backend tracks all ACKs.
+    // Trade-off: If multiple bridges succeed, the order prints multiple times
+    // (which is acceptable for redundancy in a multi-printer setup).
 
     // ── Fan-out: send to every enabled printer in parallel ────────────────
     const printers = cfg.PRINTERS;
