@@ -35,10 +35,13 @@ function mergeWithEnv(saved) {
     tenantName:      saved.tenantName      ?? '',
     stationId:       saved.stationId       ?? process.env.STATION_ID        ?? '',
     stationName:     saved.stationName     ?? '',
+    // Legacy single-printer (kept for backward compat)
     printerIp:       saved.printerIp       ?? process.env.PRINTER_IP        ?? '192.168.100.100',
     printerPort:     saved.printerPort     ?? process.env.PRINTER_PORT      ?? '9100',
     receiptWidth:    saved.receiptWidth    ?? process.env.RECEIPT_WIDTH     ?? '48',
     printOrderTypes: saved.printOrderTypes ?? process.env.PRINT_ORDER_TYPES ?? '',
+    // Multi-printer list
+    printers:        Array.isArray(saved.printers) ? saved.printers : [],
   };
 }
 
@@ -100,6 +103,12 @@ function renderPage(config, saved = false, error = '') {
     .btn:disabled{background:#a5b4fc;cursor:not-allowed}
     .footer-note{text-align:center;font-size:11px;color:#9ca3af;margin-top:20px}
     code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-family:monospace}
+    .add-btn{width:100%;padding:9px;background:transparent;color:#6366f1;border:1.5px dashed #6366f1;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;margin-top:4px}
+    .add-btn:hover{background:#eff0ff}
+    .printer-row{display:grid;grid-template-columns:1fr 80px 90px auto;gap:8px;align-items:end;margin-bottom:10px;padding:12px;border:1.5px solid #e5e7eb;border-radius:10px;background:#fafafa}
+    .printer-row .field{margin-bottom:0}
+    .remove-btn{background:none;border:1.5px solid #fecaca;color:#ef4444;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;transition:all .15s;height:40px}
+    .remove-btn:hover{background:#fef2f2}
   </style>
 </head>
 <body>
@@ -151,21 +160,10 @@ function renderPage(config, saved = false, error = '') {
       </div>
 
       <div class="section">
-        <div class="section-title">Step 2 — Printer connection</div>
-        <div class="row">
-          <div class="field">
-            <label>Printer IP Address</label>
-            <input class="mono" type="text" name="printerIp"
-              value="${v('printerIp')}" placeholder="192.168.100.100"/>
-            <div class="hint">Check printer network settings</div>
-          </div>
-          <div class="field">
-            <label>Port</label>
-            <input class="mono" type="number" name="printerPort"
-              value="${v('printerPort')}" placeholder="9100"/>
-            <div class="hint">Default: 9100</div>
-          </div>
-        </div>
+        <div class="section-title">Step 2 — Printers</div>
+        <div id="printerList"></div>
+        <button type="button" class="add-btn" onclick="addPrinter()">+ Add Printer</button>
+        <input type="hidden" name="printersJson" id="printersJson" value=""/>
       </div>
 
       <div class="section">
@@ -312,7 +310,75 @@ function renderPage(config, saved = false, error = '') {
     const backend = document.getElementById('backendUrl').value.trim();
 
     if (key && backend) validateKey();
+
+    // Initialise printer list from saved config
+    const saved = ${JSON.stringify(config.printers || [])};
+    if (saved.length > 0) {
+      saved.forEach(p => addPrinter(p));
+    } else {
+      // Seed from legacy single-printer fields
+      addPrinter({ label: 'Printer 1', ip: '${v('printerIp')}', port: '${v('printerPort')}', paperWidth: '${v('receiptWidth') === '32' ? '58mm' : '80mm'}' });
+    }
+    syncPrintersJson();
   });
+
+  let printerCount = 0;
+
+  function addPrinter(p = {}) {
+    printerCount++;
+    const idx = printerCount;
+    const list = document.getElementById('printerList');
+    const row  = document.createElement('div');
+    row.className = 'printer-row';
+    row.id = 'printer-row-' + idx;
+    row.innerHTML = \`
+      <div class="field">
+        <label>Label</label>
+        <input type="text" class="p-label" placeholder="Printer \${idx}" value="\${escAttr(p.label||'Printer '+idx)}" oninput="syncPrintersJson()"/>
+      </div>
+      <div class="field">
+        <label>IP Address</label>
+        <input type="text" class="mono p-ip" placeholder="192.168.x.x" value="\${escAttr(p.ip||'')}" oninput="syncPrintersJson()"/>
+      </div>
+      <div class="field">
+        <label>Port</label>
+        <input type="number" class="mono p-port" placeholder="9100" value="\${escAttr(p.port||'9100')}" oninput="syncPrintersJson()"/>
+      </div>
+      <div class="field">
+        <label>Width</label>
+        <select class="p-width" onchange="syncPrintersJson()">
+          <option value="80mm" \${(p.paperWidth||'80mm')==='80mm'?'selected':''}>80mm</option>
+          <option value="58mm" \${p.paperWidth==='58mm'?'selected':''}>58mm</option>
+        </select>
+      </div>
+      <button type="button" class="remove-btn" onclick="removePrinter(\${idx})" title="Remove">✕</button>
+    \`;
+    list.appendChild(row);
+    syncPrintersJson();
+  }
+
+  function removePrinter(idx) {
+    const row = document.getElementById('printer-row-' + idx);
+    if (row) row.remove();
+    syncPrintersJson();
+  }
+
+  function syncPrintersJson() {
+    const rows = document.querySelectorAll('.printer-row');
+    const printers = [];
+    rows.forEach(row => {
+      const ip = row.querySelector('.p-ip')?.value?.trim();
+      if (!ip) return;
+      printers.push({
+        label:      row.querySelector('.p-label')?.value?.trim() || 'Printer',
+        ip,
+        port:       parseInt(row.querySelector('.p-port')?.value || '9100', 10) || 9100,
+        paperWidth: row.querySelector('.p-width')?.value || '80mm',
+        enabled:    true,
+      });
+    });
+    document.getElementById('printersJson').value = JSON.stringify(printers);
+  }
 </script>
 </body>
 </html>`;
@@ -336,6 +402,14 @@ function startConfigServer(onConfigSaved) {
       req.on('end', () => {
         try {
           const p = new URLSearchParams(body);
+          let printers = [];
+          try {
+            const raw = p.get('printersJson');
+            if (raw) printers = JSON.parse(raw);
+          } catch (_) {}
+
+          // Build legacy single-printer fields from the first printer entry (backward compat)
+          const firstPrinter = printers[0] || {};
           const data = {
             backendUrl:      p.get('backendUrl')?.trim()      || '',
             wsApiKey:        p.get('wsApiKey')?.trim()        || '',
@@ -344,15 +418,18 @@ function startConfigServer(onConfigSaved) {
             tenantName:      p.get('tenantName')?.trim()      || '',
             stationId:       p.get('stationId')?.trim()       || '',
             stationName:     p.get('stationName')?.trim()     || '',
-            printerIp:       p.get('printerIp')?.trim()       || '192.168.100.100',
-            printerPort:     p.get('printerPort')?.trim()     || '9100',
-            receiptWidth:    p.get('receiptWidth')?.trim()    || '48',
+            // Legacy fields — mirror first printer so old bridge versions still work
+            printerIp:       firstPrinter.ip    || '192.168.100.100',
+            printerPort:     firstPrinter.port  || '9100',
+            receiptWidth:    firstPrinter.paperWidth === '58mm' ? '32' : '48',
             printOrderTypes: p.get('printOrderTypes')?.trim() || '',
+            // Multi-printer list
+            printers,
           };
 
           if (!data.backendUrl) throw new Error('Backend URL is required');
           if (!data.wsApiKey)   throw new Error('API Key is required');
-          if (!data.printerIp)  throw new Error('Printer IP is required');
+          if (data.printers.length === 0) throw new Error('Add at least one printer');
 
           saveConfig(data);
           if (onConfigSaved) onConfigSaved(data);

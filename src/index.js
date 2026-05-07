@@ -29,18 +29,47 @@ let _stopped         = false;
 
 function getConfig() {
   const saved = loadConfig();
+
+  // Build the printers list.
+  // Priority: saved.printers[] array → legacy single printerIp → env vars
+  let printers = [];
+
+  if (Array.isArray(saved.printers) && saved.printers.length > 0) {
+    // Multi-printer config (new format)
+    printers = saved.printers
+      .filter((p) => p && p.ip && p.enabled !== false)
+      .map((p) => ({
+        label:      p.label || 'Printer',
+        ip:         p.ip,
+        port:       parseInt(p.port, 10) || 9100,
+        paperWidth: p.paperWidth === '58mm' ? 32 : 48,
+      }));
+  }
+
+  // Always fall back to the legacy single-printer fields so existing installs keep working
+  const legacyIp   = saved.printerIp   || process.env.PRINTER_IP   || '';
+  const legacyPort = parseInt(saved.printerPort || process.env.PRINTER_PORT || '9100', 10);
+  const legacyWidth = parseInt(saved.receiptWidth || process.env.RECEIPT_WIDTH || '48', 10);
+
+  if (printers.length === 0 && legacyIp) {
+    printers = [{ label: 'Printer', ip: legacyIp, port: legacyPort, paperWidth: legacyWidth }];
+  }
+
   return {
     BACKEND_URL:     saved.backendUrl      || process.env.BACKEND_URL      || '',
     WS_API_KEY:      saved.wsApiKey        || process.env.WS_API_KEY        || '',
     BRANCH_ID:       saved.branchId        || process.env.BRANCH_ID         || '',
     STATION_ID:      saved.stationId       || process.env.STATION_ID        || '',
-    PRINTER_IP:      saved.printerIp       || process.env.PRINTER_IP        || '192.168.100.100',
-    PRINTER_PORT:    parseInt(saved.printerPort  || process.env.PRINTER_PORT  || '9100', 10),
+    // Legacy single-printer (kept for logging / backward compat)
+    PRINTER_IP:      legacyIp,
+    PRINTER_PORT:    legacyPort,
     RESTAURANT_NAME: saved.tenantName      || saved.restaurantName          ||
                      process.env.RESTAURANT_NAME                            || 'RESTAURANT',
-    RECEIPT_WIDTH:   parseInt(saved.receiptWidth || process.env.RECEIPT_WIDTH || '48', 10),
+    RECEIPT_WIDTH:   legacyWidth,
     PRINT_TYPES:     (saved.printOrderTypes || process.env.PRINT_ORDER_TYPES || '')
                        .split(',').map(t => t.trim().toLowerCase()).filter(Boolean),
+    // Multi-printer list (always populated — at least one entry)
+    PRINTERS:        printers,
   };
 }
 
@@ -115,42 +144,66 @@ function startBridge(cfg, onStatus) {
       }
     }
 
-    let lastError = '';
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        await sendToPrinter(receipt, cfg.PRINTER_IP, cfg.PRINTER_PORT);
-        console.log(`[Print] ✓ Order ${order.orderNumber ?? order.id} printed`);
+    // ── Fan-out: send to every enabled printer in parallel ────────────────
+    const printers = cfg.PRINTERS;
+    const results  = await Promise.allSettled(
+      printers.map(async (printer) => {
+        // Build a receipt sized for this specific printer
+        const printerReceipt = buildReceipt(order, {
+          restaurantName: order.tenantName || cfg.RESTAURANT_NAME,
+          branchName:     order.branchName || '',
+          width:          printer.paperWidth,
+        });
 
-        // ACK only after confirmed printer write success
-        if (printJobId) {
+        let lastErr = '';
+        for (let attempt = 1; attempt <= 3; attempt++) {
           try {
-            await apiPost(cfg, `/print-jobs/${printJobId}/ack`);
-            console.log(`[Print] ✓ ACK sent for job ${printJobId}`);
-          } catch (ackErr) {
-            console.error(`[Print] ACK failed for job ${printJobId}: ${ackErr.message}`);
+            await sendToPrinter(printerReceipt, printer.ip, printer.port);
+            console.log(`[Print] ✓ ${printer.label} (${printer.ip}) — order ${order.orderNumber ?? order.id}`);
+            return; // success for this printer
+          } catch (err) {
+            lastErr = err.message;
+            console.error(`[Print] ✗ ${printer.label} attempt ${attempt}/3: ${err.message}`);
+            if (attempt < 3) await sleep(2000 * attempt);
           }
         }
-        _inFlight.delete(printJobId);
-        return;
-      } catch (err) {
-        lastError = err.message;
-        console.error(`[Print] ✗ Attempt ${attempt}/3 failed: ${err.message}`);
-        if (attempt < 3) await sleep(2000 * attempt);
+        throw new Error(`${printer.label} (${printer.ip}): ${lastErr}`);
+      })
+    );
+
+    const allFailed = results.every((r) => r.status === 'rejected');
+    const errors    = results
+      .filter((r) => r.status === 'rejected')
+      .map((r) => r.reason?.message || 'unknown error');
+
+    if (errors.length > 0) {
+      console.error(`[Print] ✗ ${errors.length}/${printers.length} printer(s) failed: ${errors.join(' | ')}`);
+    }
+
+    if (!allFailed) {
+      // At least one printer succeeded — ACK the job
+      if (printJobId) {
+        try {
+          await apiPost(cfg, `/print-jobs/${printJobId}/ack`);
+          console.log(`[Print] ✓ ACK sent for job ${printJobId}`);
+        } catch (ackErr) {
+          console.error(`[Print] ACK failed for job ${printJobId}: ${ackErr.message}`);
+        }
+      }
+    } else {
+      // Every printer failed — reset so the next poll retries
+      console.error(`[Print] ✗ All printers failed for order ${order.orderNumber ?? order.id}`);
+      if (printJobId) {
+        try {
+          await apiPost(cfg, `/print-jobs/${printJobId}/reset`);
+          console.log(`[Print] Job ${printJobId} reset to pending for future retry`);
+        } catch (resetErr) {
+          console.error(`[Print] Could not reset job ${printJobId}: ${resetErr.message}`);
+        }
       }
     }
 
-    console.error(`[Print] ✗ Giving up on order ${order.orderNumber ?? order.id}`);
-
-    // Reset job back to "pending" so the next sync poll will retry it.
-    if (printJobId) {
-      try {
-        await apiPost(cfg, `/print-jobs/${printJobId}/reset`);
-        console.log(`[Print] Job ${printJobId} reset to pending for future retry`);
-      } catch (resetErr) {
-        console.error(`[Print] Could not reset job ${printJobId}: ${resetErr.message}`);
-      }
-      _inFlight.delete(printJobId);
-    }
+    _inFlight.delete(printJobId);
   });
 
   // ── Pending job sync (recovery) ───────────────────────────────────────────
@@ -185,14 +238,9 @@ function startBridge(cfg, onStatus) {
           continue;
         }
 
-        const receipt = buildReceipt(order, {
-          restaurantName: order.tenantName || cfg.RESTAURANT_NAME,
-          branchName:     order.branchName || '',
-          width:          cfg.RECEIPT_WIDTH,
-        });
-
+        // Receipt is built per-printer inside the queue processor
         _inFlight.add(job._id);
-        queue.enqueue({ order, receipt, printJobId: job._id });
+        queue.enqueue({ order, receipt: null, printJobId: job._id });
       }
     } catch (err) {
       console.error('[Sync] Failed to fetch pending jobs:', err.message);
@@ -271,19 +319,14 @@ function startBridge(cfg, onStatus) {
 
         console.log(`[WS] New order: ${order.orderNumber ?? order.id} (${order.orderType})`);
 
-        const receipt = buildReceipt(order, {
-          restaurantName: order.tenantName || cfg.RESTAURANT_NAME,
-          branchName:     order.branchName || '',
-          width:          cfg.RECEIPT_WIDTH,
-        });
-
         // printJobId is attached by the backend so we can ACK after print
         const printJobId = payload?.printJobId || null;
 
         // Register in-flight so the sync poll doesn't re-enqueue this job
         if (printJobId) _inFlight.add(printJobId);
 
-        queue.enqueue({ order, receipt, printJobId });
+        // Receipt is built per-printer inside the queue processor
+        queue.enqueue({ order, receipt: null, printJobId });
       } catch (err) {
         console.error('[WS] Error handling order_created:', err.message);
       }
@@ -296,7 +339,9 @@ function startBridge(cfg, onStatus) {
 
   console.log('─────────────────────────────────────────');
   console.log('  KDS Print Bridge');
-  console.log(`  Printer : ${cfg.PRINTER_IP}:${cfg.PRINTER_PORT}`);
+  cfg.PRINTERS.forEach((p, i) =>
+    console.log(`  Printer ${i + 1} : ${p.label} — ${p.ip}:${p.port} (${p.paperWidth === 32 ? '58mm' : '80mm'})`)
+  );
   console.log(`  Backend : ${cfg.BACKEND_URL}`);
   console.log(`  Branch  : ${cfg.BRANCH_ID}`);
   console.log(`  Station : ${cfg.STATION_ID || 'ALL'}`);
