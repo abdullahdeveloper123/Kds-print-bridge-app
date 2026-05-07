@@ -39,10 +39,15 @@ function getConfig() {
     printers = saved.printers
       .filter((p) => p && p.ip && p.enabled !== false)
       .map((p) => ({
-        label:      p.label || 'Printer',
-        ip:         p.ip,
-        port:       parseInt(p.port, 10) || 9100,
-        paperWidth: p.paperWidth === '58mm' ? 32 : 48,
+        label:                 p.label || 'Printer',
+        ip:                    p.ip,
+        port:                  parseInt(p.port, 10) || 9100,
+        paperWidth:            p.paperWidth === '58mm' ? 32 : 48,
+        // Station filter — array of subcategory ID strings; empty = print all items
+        stationSubcategoryIds: Array.isArray(p.stationSubcategoryIds)
+          ? p.stationSubcategoryIds.map(String).filter(Boolean)
+          : [],
+        stationName:           p.stationName || null,
       }));
   }
 
@@ -52,7 +57,7 @@ function getConfig() {
   const legacyWidth = parseInt(saved.receiptWidth || process.env.RECEIPT_WIDTH || '48', 10);
 
   if (printers.length === 0 && legacyIp) {
-    printers = [{ label: 'Printer', ip: legacyIp, port: legacyPort, paperWidth: legacyWidth }];
+    printers = [{ label: 'Printer', ip: legacyIp, port: legacyPort, paperWidth: legacyWidth, stationSubcategoryIds: [], stationName: null }];
   }
 
   return {
@@ -148,8 +153,30 @@ function startBridge(cfg, onStatus) {
     const printers = cfg.PRINTERS;
     const results  = await Promise.allSettled(
       printers.map(async (printer) => {
+        // ── Station filtering ─────────────────────────────────────────────
+        // If this printer is assigned to a KDS station, only print the items
+        // that belong to that station's subcategories.
+        // If no station is assigned, print the full order (all items).
+        let printOrder = order;
+        if (printer.stationSubcategoryIds && printer.stationSubcategoryIds.length > 0) {
+          const stationItems = (order.items || []).filter((item) => {
+            const subCatId = item.subCategoryId ? String(item.subCategoryId) : null;
+            return subCatId && printer.stationSubcategoryIds.includes(subCatId);
+          });
+
+          if (stationItems.length === 0) {
+            // No items for this station in this order — skip printer silently
+            console.log(`[Print] ⏭ ${printer.label} — no items for station "${printer.stationName || 'assigned'}", skipping`);
+            return;
+          }
+
+          // Build a filtered order copy with only this station's items
+          printOrder = { ...order, items: stationItems };
+          console.log(`[Print] ${printer.label} — printing ${stationItems.length}/${(order.items || []).length} item(s) for station "${printer.stationName || 'assigned'}"`);
+        }
+
         // Build a receipt sized for this specific printer
-        const printerReceipt = buildReceipt(order, {
+        const printerReceipt = buildReceipt(printOrder, {
           restaurantName: order.tenantName || cfg.RESTAURANT_NAME,
           branchName:     order.branchName || '',
           width:          printer.paperWidth,
@@ -171,7 +198,9 @@ function startBridge(cfg, onStatus) {
       })
     );
 
-    const allFailed = results.every((r) => r.status === 'rejected');
+    // A skipped printer (no matching items) resolves with undefined — not a failure.
+    const actualAttempts = results.filter((r) => !(r.status === 'fulfilled' && r.value === undefined));
+    const allFailed = actualAttempts.length > 0 && actualAttempts.every((r) => r.status === 'rejected');
     const errors    = results
       .filter((r) => r.status === 'rejected')
       .map((r) => r.reason?.message || 'unknown error');
