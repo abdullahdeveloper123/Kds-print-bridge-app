@@ -107,7 +107,7 @@ function openSetupWindow() {
     height:      620,
     resizable:   false,
     maximizable: false,
-    title:       'KDS Print Bridge — Setup',
+    title:       'Invextech Printer — Setup',
     icon:        path.join(__dirname, 'tray-icon.png'),
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
@@ -128,7 +128,7 @@ function createTray() {
   if (icon.isEmpty()) icon = nativeImage.createEmpty();
 
   tray = new Tray(icon);
-  tray.setToolTip('KDS Print Bridge');
+  tray.setToolTip('Invextech Printer');
   setTrayStatus('starting');
 
   // Double-click tray icon → open setup
@@ -146,7 +146,7 @@ function setTrayStatus(status) {
   }[status] || '⏳ Starting…';
 
   const menu = Menu.buildFromTemplate([
-    { label: 'KDS Print Bridge',  enabled: false },
+    { label: 'Invextech Printer',  enabled: false },
     { label,                      enabled: false },
     { type: 'separator' },
     { label: '⚙️  Reconfigure',   click: () => openSetupWindow() },
@@ -155,7 +155,7 @@ function setTrayStatus(status) {
   ]);
 
   tray.setContextMenu(menu);
-  tray.setToolTip(`KDS Print Bridge — ${label}`);
+  tray.setToolTip(`Invextech Printer — ${label}`);
 }
 
 // ── Bridge lifecycle ──────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ function startBridgeService() {
     console.error('[Main] Bridge failed to start:', err);
     setTrayStatus('disconnected');
     dialog.showErrorBox(
-      'KDS Print Bridge',
+      'Invextech Printer',
       'Bridge failed to start:\n\n' + err.message +
       '\n\nCheck your configuration and try again.'
     );

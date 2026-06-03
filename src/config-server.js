@@ -55,7 +55,7 @@ function renderPage(config, saved = false, error = '') {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>KDS Print Bridge — Setup</title>
+  <title>Invextech Printer — Setup</title>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px}
@@ -114,7 +114,7 @@ function renderPage(config, saved = false, error = '') {
 <body>
 <div class="card">
   <div class="card-header">
-    <h1>🖨️ KDS Print Bridge</h1>
+    <h1>🖨️ Invextech Printer</h1>
     <p>Configure your printer — no technical knowledge needed</p>
     <div class="badge"><span class="dot"></span> Local Setup Tool · http://localhost:${PORT}</div>
   </div>

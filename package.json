@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "com.yumfood.kds-print-bridge",
-    "productName": "KDS Print Bridge",
+    "productName": "Invextech Printer",
     "copyright": "Copyright © 2024 YumFood",
     "directories": {
       "output": "dist"
