@@ -80,6 +80,17 @@ function getConfig() {
 
 // ── Stop (called before reconfigure) ─────────────────────────────────────────
 
+function isToday(value) {
+  if (!value) return false;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return false;
+
+  const now = new Date();
+  return dt.getFullYear() === now.getFullYear()
+    && dt.getMonth() === now.getMonth()
+    && dt.getDate() === now.getDate();
+}
+
 function stop() {
   _stopped = true;
   if (_reconnectTimer) { clearTimeout(_reconnectTimer);   _reconnectTimer  = null; }
@@ -124,8 +135,23 @@ function startBridge(cfg, onStatus) {
   // Track job IDs currently in the local queue or being printed.
   // Prevents the 10s poll from re-enqueueing a job that's already in-flight.
   const _inFlight = new Set();
+  const _invalidatedJobs = new Set();
+  let _clearVersion = 0;
 
-  const queue = new PrintQueue(async ({ order, receipt, printJobId }) => {
+  const queue = new PrintQueue(async ({ order, receipt, printJobId, queueVersion }) => {
+    const jobVersion = queueVersion ?? _clearVersion;
+    const isCancelled = () => (
+      _stopped ||
+      jobVersion !== _clearVersion ||
+      (printJobId && _invalidatedJobs.has(String(printJobId)))
+    );
+
+    if (isCancelled()) {
+      console.log(`[Print] Skipping cleared job ${printJobId || order?.orderNumber || order?.id}`);
+      if (printJobId) _inFlight.delete(String(printJobId));
+      return;
+    }
+
     console.log(`[Print] Printing order ${order.orderNumber ?? order.id} ...`);
 
     // ── Multi-bridge mode: No claim check ─────────────────────────────────
@@ -169,6 +195,11 @@ function startBridge(cfg, onStatus) {
 
         let lastErr = '';
         for (let attempt = 1; attempt <= 3; attempt++) {
+          if (isCancelled()) {
+            console.log(`[Print] Cancelled cleared job ${printJobId || order.orderNumber || order.id}`);
+            return;
+          }
+
           try {
             await sendToPrinter(printerReceipt, printer.ip, printer.port);
             console.log(`[Print] ✓ ${printer.label} (${printer.ip}) — order ${order.orderNumber ?? order.id}`);
@@ -194,6 +225,12 @@ function startBridge(cfg, onStatus) {
       console.error(`[Print] ✗ ${errors.length}/${printers.length} printer(s) failed: ${errors.join(' | ')}`);
     }
 
+    if (isCancelled()) {
+      console.log(`[Print] Not ACK/resetting cleared job ${printJobId || order.orderNumber || order.id}`);
+      if (printJobId) _inFlight.delete(String(printJobId));
+      return;
+    }
+
     if (!allFailed) {
       // At least one printer succeeded — ACK the job
       if (printJobId) {
@@ -217,7 +254,7 @@ function startBridge(cfg, onStatus) {
       }
     }
 
-    _inFlight.delete(printJobId);
+    if (printJobId) _inFlight.delete(String(printJobId));
   });
 
   // ── Pending job sync (recovery) ───────────────────────────────────────────
@@ -239,9 +276,18 @@ function startBridge(cfg, onStatus) {
       for (const job of jobs) {
         const order = job.payloadJson;
         if (!order) continue;
+        const jobId = String(job._id);
+        if (_invalidatedJobs.has(jobId)) {
+          console.log(`[Sync] Job ${jobId} was cleared locally - skipping`);
+          continue;
+        }
+        if (!isToday(job.createdAt || order.orderTime || order.createdAt)) {
+          console.log(`[Sync] Skipping old job ${jobId}`);
+          continue;
+        }
 
         // Skip if this job is already queued or being printed locally
-        if (_inFlight.has(job._id)) {
+        if (_inFlight.has(jobId)) {
           console.log(`[Sync] Job ${job._id} already in-flight — skipping`);
           continue;
         }
@@ -253,8 +299,8 @@ function startBridge(cfg, onStatus) {
         }
 
         // Receipt is built per-printer inside the queue processor
-        _inFlight.add(job._id);
-        queue.enqueue({ order, receipt: null, printJobId: job._id });
+        _inFlight.add(jobId);
+        queue.enqueue({ order, receipt: null, printJobId: jobId, queueVersion: _clearVersion });
       }
     } catch (err) {
       console.error('[Sync] Failed to fetch pending jobs:', err.message);
@@ -334,15 +380,56 @@ function startBridge(cfg, onStatus) {
         console.log(`[WS] New order: ${order.orderNumber ?? order.id} (${order.orderType})`);
 
         // printJobId is attached by the backend so we can ACK after print
-        const printJobId = payload?.printJobId || null;
+        const printJobId = payload?.printJobId ? String(payload.printJobId) : null;
+        if (printJobId && _invalidatedJobs.has(printJobId)) {
+          console.log(`[WS] Skipping cleared job ${printJobId}`);
+          return;
+        }
+        if (!isToday(order.orderTime || order.createdAt)) {
+          console.log(`[WS] Skipping old order ${order.orderNumber ?? order.id}`);
+          return;
+        }
 
         // Register in-flight so the sync poll doesn't re-enqueue this job
         if (printJobId) _inFlight.add(printJobId);
 
         // Receipt is built per-printer inside the queue processor
-        queue.enqueue({ order, receipt: null, printJobId });
+        queue.enqueue({ order, receipt: null, printJobId, queueVersion: _clearVersion });
       } catch (err) {
         console.error('[WS] Error handling order_created:', err.message);
+      }
+    });
+
+    socket.on('print_jobs_cleared', (payload = {}) => {
+      try {
+        const eventBranchId = payload.branchId ? String(payload.branchId) : '';
+        if (eventBranchId && eventBranchId !== String(cfg.BRANCH_ID)) return;
+
+        const status = payload.status || null;
+        const shouldFlush = !status || ['pending', 'printing', 'failed'].includes(String(status));
+        if (!shouldFlush) return;
+
+        const jobIds = Array.isArray(payload.jobIds) ? payload.jobIds.map(String) : [];
+        jobIds.forEach((jobId) => _invalidatedJobs.add(jobId));
+
+        if (jobIds.length === 0) {
+          _clearVersion += 1;
+        }
+
+        const removed = queue.clear((job) => {
+          if (jobIds.length === 0) return true;
+          return job.printJobId && jobIds.includes(String(job.printJobId));
+        });
+
+        if (jobIds.length === 0) {
+          _inFlight.clear();
+        } else {
+          jobIds.forEach((jobId) => _inFlight.delete(jobId));
+        }
+
+        console.log(`[WS] Print jobs cleared by server - dropped ${removed} queued job(s).`);
+      } catch (err) {
+        console.error('[WS] Error handling print_jobs_cleared:', err.message);
       }
     });
 

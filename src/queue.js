@@ -15,6 +15,18 @@ class PrintQueue {
     this._drain();
   }
 
+  clear(predicate = null) {
+    const before = this._queue.length;
+    this._queue = typeof predicate === 'function'
+      ? this._queue.filter((job) => !predicate(job))
+      : [];
+    return before - this._queue.length;
+  }
+
+  size() {
+    return this._queue.length;
+  }
+
   async _drain() {
     if (this._running) return;
     this._running = true;
