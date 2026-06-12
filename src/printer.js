@@ -48,6 +48,12 @@ function now() {
   return `${dd}/${mm}/${yyyy} ${hh}:${min} ${ampm}`;
 }
 
+function getReceiptItemName(item) {
+  const name = String(item.name ?? 'Item');
+  const dealName = String(item.dealName ?? '').trim();
+  return item.isDeal && dealName ? `${name} (${dealName})` : name;
+}
+
 // ── Receipt builder ───────────────────────────────────────────────────────────
 
 function buildReceipt(order, config = {}) {
@@ -117,7 +123,7 @@ function buildReceipt(order, config = {}) {
 
   for (const item of items) {
     const qty  = item.quantity ?? item.qty ?? 1;
-    const name = String(item.name ?? 'Item').slice(0, ITEM_W);
+    const name = getReceiptItemName(item).slice(0, ITEM_W);
     const row  = name.padEnd(ITEM_W) + String(qty).padStart(QTY_W);
     p(row + '\n');
 

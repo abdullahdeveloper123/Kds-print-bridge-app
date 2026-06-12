@@ -19,6 +19,8 @@ const sampleOrder = {
   items: [
     {
       name: 'Burger',
+      isDeal: true,
+      dealName: 'Family Feast',
       quantity: 2,
       totalPrice: 200,
       variants: [{ selectedOptions: [{ optionName: 'Large' }] }],
@@ -46,6 +48,13 @@ const receipt = buildReceipt(sampleOrder, {
   restaurantName: 'MY RESTAURANT',
   width: 32,
 });
+
+if (!receipt.includes('Burger (Family Feast)')) {
+  throw new Error('Deal item name was not included in the receipt');
+}
+if (!receipt.includes('Fries') || receipt.includes('Fries (')) {
+  throw new Error('Normal item name was changed unexpectedly');
+}
 
 // Strip control bytes for terminal display
 const readable = receipt.replace(/[\x00-\x1F\x7F]/g, (c) => {
